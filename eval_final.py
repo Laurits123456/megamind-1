@@ -56,8 +56,7 @@ def llm(prompt, max_tokens=800):
     return ""
 
 def lexical_judge(question: str, gold: str, generated: str) -> str | None:
-    """Fast lexical pre-judge. Returns 'yes'/'no' or None (defer to LLM)."""
-    import re as _re
+    """Minimal pre-judge. Only handles clear IDK cases; defers everything else to LLM judge."""
     g = str(gold).lower().strip()
     h = str(generated).lower().strip()
 
@@ -66,58 +65,18 @@ def lexical_judge(question: str, gold: str, generated: str) -> str | None:
                    "not specifically", "does not specify", "not given", "not clear", "not described",
                    "is not mentioned", "no specific", "not available", "not in the context",
                    "no context", "conversation does not"]
-    h_has_fact = len([w for w in h.split() if len(w) > 3]) > 12
     h_is_idk = any(p in h for p in idk_phrases)
+    h_has_fact = len([w for w in h.split() if len(w) > 3]) > 12
 
-    # Gold is unanswerable — model should say IDK
     gold_is_idk = any(p in g for p in ["not enough", "not mentioned", "cannot determine",
                                         "no information", "not provided", "not specified"])
     if gold_is_idk:
-        return "yes" if h_is_idk else None  # defer to LLM if model tried to answer
+        return "yes" if h_is_idk else None
 
     if h_is_idk and not h_has_fact:
         return "no"
 
-    # Exact/contains match
-    if g in h or h[:100] in g:
-        return "yes"
-
-    # Year match
-    gold_years = set(_re.findall(r'\b(20\d\d|19\d\d)\b', g))
-    gen_years = set(_re.findall(r'\b(20\d\d|19\d\d)\b', h))
-    if gold_years and gold_years & gen_years:
-        return "yes"
-
-    # Number match (single gold number)
-    gold_nums = set(_re.findall(r'\b\d+\b', g))
-    gen_nums = set(_re.findall(r'\b\d+\b', h))
-    if gold_nums and len(gold_nums) == 1 and gold_nums <= gen_nums:
-        return "yes"
-
-    # Word-number equivalence (four=4)
-    num_words = {"zero":0,"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,
-                 "eight":8,"nine":9,"ten":10,"eleven":11,"twelve":12}
-    g_nums_all = set(_re.findall(r'\b\d+\b', g))
-    h_nums_all = set(_re.findall(r'\b\d+\b', h))
-    for w, n in num_words.items():
-        if w in g: g_nums_all.add(str(n))
-        if w in h: h_nums_all.add(str(n))
-    if g_nums_all and len(g_nums_all) == 1 and g_nums_all <= h_nums_all:
-        return "yes"
-
-    # Token overlap ≥60% for multi-word gold; single key-word must appear in hypothesis
-    g_toks = set(t.strip('.,!?"\'()') for t in g.split() if len(t) > 2)
-    h_toks = set(t.strip('.,!?"\'()') for t in h.split() if len(t) > 2)
-    if g_toks:
-        if len(g_toks) == 1 and g_toks <= h_toks:
-            return "yes"
-        elif len(g_toks) >= 2:
-            ratio = len(g_toks & h_toks) / len(g_toks)
-            if ratio >= 0.6:
-                return "yes"
-
-    return None  # defer to LLM judge
-
+    return None  # defer to LLM judge � no substring/year/number shortcuts
 
 def judge_call(prompt, question="", gold="", generated=""):
     # Fast lexical pre-check (no API call)

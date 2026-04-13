@@ -1,18 +1,19 @@
 """
-LoCoMo pass-2 retry: retries all v7 failures with full conversation context.
-LoCoMo convs are ~19K avg tokens, fits in GPT-4.1 128K window.
+LoCoMo pass-2 retry: retries failures with full conversation context.
+LoCoMo convs avg ~19K tokens, fits in GPT-4.1 128K window.
+No gold leakage — uses only generic category-level system prompts.
 """
 from __future__ import annotations
-import json, re, time, sys
+import json, time, os
 from pathlib import Path
 from collections import defaultdict
 import openai
 
-OPENAI_KEY = os.environ.get('OPENAI_API_KEY', '')
+OPENAI_KEY = os.environ.get("OPENAI_API_KEY", "")
 client = openai.OpenAI(api_key=OPENAI_KEY)
 MODEL = "gpt-4.1"
-LOCOMO_PATH = "C:/Users/lauri/AOE/Legendary/benchmarks/data/locomo10.json"
-CAT_NAMES = {1:"single-session", 2:"multi-session", 3:"open-domain", 4:"temporal", 5:"adversarial"}
+LOCOMO_PATH = os.environ.get("LOCOMO_PATH", "locomo10.json")
+CAT_NAMES = {1: "single-session", 2: "multi-session", 3: "open-domain", 4: "temporal", 5: "adversarial"}
 
 
 def gpt(system, user, mt=300, temp=0):
@@ -33,14 +34,16 @@ def gpt(system, user, mt=300, temp=0):
 
 
 def locomo_judge(question, gold, generated):
+    """LLM judge only — no substring shortcuts."""
     if not generated:
         return False
-    g, h = str(gold).lower().strip(), str(generated).lower().strip()
-    if g in h or h in g:
-        return True
+    g = str(gold).lower().strip()
+    h = str(generated).lower().strip()
+    # Only safe shortcut: exact yes/no gold
     if g in ("yes", "no"):
         return g in h[:20]
-    verdict = gpt("", f"Question: {question}\nGold: {gold}\nGenerated: {generated}\nDoes the generated answer correctly answer the question? YES or NO.", mt=5)
+    verdict = gpt("", f"Question: {question}\nGold: {gold}\nGenerated: {generated}\n"
+                      f"Does the generated answer correctly answer the question? YES or NO.", mt=5)
     return "YES" in verdict.upper()
 
 
@@ -53,14 +56,13 @@ def full_conv(sess_data):
 
 def answer_full(question, category, sess_data):
     ctx = full_conv(sess_data)
-    if category in (1, 2):
-        sys_prompt = "Answer the question using the conversation. Use inference if needed. Be concise."
-    elif category == 3:
-        sys_prompt = "Answer using evidence from the conversation. Inference is OK. Be concise."
-    elif category == 4:
-        sys_prompt = "Find the specific fact in the conversation and give a direct answer."
-    else:
-        sys_prompt = "Answer concisely based on the conversation."
+    prompts = {
+        1: "Answer the question using the conversation. Use inference if needed. Be concise.",
+        2: "Answer the question using the conversation. Use inference if needed. Be concise.",
+        3: "Answer using evidence from the conversation. Inference is OK. Be concise.",
+        4: "Find the specific fact in the conversation and give a direct answer.",
+    }
+    sys_prompt = prompts.get(category, "Answer concisely based on the conversation.")
     return gpt(sys_prompt, f"Conversation:\n{ctx}\n\nQuestion: {question}\n\nAnswer:", mt=300)
 
 
@@ -68,7 +70,7 @@ def main():
     ck_path = Path("unified_v2_locomo_checkpoint.json")
     checkpoint = json.loads(ck_path.read_text())
     failures = {k: v for k, v in checkpoint.items() if not v.get("correct", False)}
-    print(f"Failures: {len(failures)}")
+    print(f"Failures to retry: {len(failures)}")
 
     data = json.load(open(LOCOMO_PATH, encoding="utf-8"))
     all_items = {}
@@ -95,7 +97,8 @@ def main():
     n_improved = n_tried = 0
     for k in failures:
         if k in p2:
-            if p2[k].get("correct"): n_improved += 1
+            if p2[k].get("correct"):
+                n_improved += 1
             continue
         if k not in all_items:
             continue
@@ -111,10 +114,11 @@ def main():
         correct = locomo_judge(question, gold, hyp)
         print(f"  Got: {hyp[:100]}")
         print(f"  {'PASS' if correct else 'FAIL'}", flush=True)
-        p2[k] = {"category": category, "cat_name": CAT_NAMES.get(category,"?"), "correct": correct,
+        p2[k] = {"category": category, "cat_name": CAT_NAMES.get(category, "?"), "correct": correct,
                  "question": question[:100], "gold": gold[:100], "hyp": hyp[:200]}
         p2_path.write_text(json.dumps(p2, ensure_ascii=False))
-        if correct: n_improved += 1
+        if correct:
+            n_improved += 1
 
     print(f"\nPass-2: tried={n_tried}, improved={n_improved}")
     merged = dict(checkpoint)
@@ -126,7 +130,7 @@ def main():
     print(f"Merged: {n_c}/{total} = {n_c/total*100:.1f}%")
     by_cat = defaultdict(list)
     for v in merged.values():
-        by_cat[v.get("category","?")].append(1 if v.get("correct") else 0)
+        by_cat[v.get("category", "?")].append(1 if v.get("correct") else 0)
     for c, scores in sorted(by_cat.items()):
         print(f"  cat{c}: {sum(scores)}/{len(scores)} = {sum(scores)/len(scores)*100:.1f}%")
 

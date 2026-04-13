@@ -167,8 +167,6 @@ def lme_judge(question, gold, generated):
     if not generated:
         return False
     g, h = str(gold).lower().strip(), str(generated).lower().strip()
-    if g in h or h in g:
-        return True
     if g in ("yes", "no"):
         return g in h[:20]
     verdict = cheap(f"""Question: {question}
@@ -408,8 +406,6 @@ def locomo_judge(question, gold, generated):
     if not generated:
         return False
     g, h = str(gold).lower().strip(), str(generated).lower().strip()
-    if g in h or h in g:
-        return True
     if g in ("yes", "no"):
         return g in h[:20]
     verdict = cheap(f"""Question: {question}

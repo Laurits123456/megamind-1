@@ -15,7 +15,7 @@ from ebrm_search import EBRMSearch
 from google import genai
 import openai as _openai
 
-GOOGLE_KEY = 'AIzaSyBjk-J9RBMa5OOMw_1zWFqXKlcQVRCk8uc'
+GOOGLE_KEY = os.environ.get('GOOGLE_API_KEY', '')
 OPENAI_KEY = os.environ.get("OPENAI_API_KEY", os.environ.get('OPENAI_API_KEY', ''))
 gclient = genai.Client(api_key=GOOGLE_KEY)
 _openai.api_key = OPENAI_KEY
